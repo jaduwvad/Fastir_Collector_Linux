@@ -1,8 +1,10 @@
+import yaml
 import sys
 import socket
 from zipfile import ZipFile
 import logging
 from datetime import datetime
+from operator import eq
 import os
 import shutil
 import subprocess
@@ -386,6 +388,78 @@ class LiveInformations(object):
             for key, value in sorted(self._additional_info.items()):
                 f.write(key + ' : ' + value + '\n')
 
+class Artifact_collector(object):
+    def __init__(self, args):
+        self._yaml_file = './linux.yaml'
+	self.args = args
+	self._log_root_dir = os.path.join(self.args['output_dir'], 'artifact_collector')
+	if not os.path.isdir(self._log_root_dir):
+	    os.mkdir(self._log_root_dir)
+
+    #write about artifacts in linux.yaml line doc
+    def _write_readme(self, directory, doc):
+        fd = open(directory + "/README", "a")
+        fd.write(doc)
+        fd.close()
+
+    #collect artifacts by file 
+    def _leave_file_log(self, data):
+        log_dir = os.path.join(self._log_root_dir, data["name"])
+        os.mkdir(log_dir)
+
+        arti_num = 0
+
+        for file_format in data["sources"][0]["attributes"]["paths"]:
+            data_file = glob.glob(file_format)
+            arti_num += len(data_file)
+
+            for f in data_file:
+                try:
+                    if os.path.isdir(f):
+                        dir_list = f.split('/')
+                        shutil.copytree(f, log_dir+"/"+dir_list[-1])
+                    else:
+                        shutil.copy(f, log_dir)
+                except Exception as e:
+                    pass
+        if arti_num == 0:
+            shutil.rmtree(log_dir, ignore_errors=False, onerror=None)
+        else:
+            self._write_readme(log_dir, data["doc"])
+	    self.args['logger'].info(data['name'] + " is colllected")
+
+    #collect artifacts by command
+    def _leave_command_log(self, data):
+        comm = data["sources"][0]["attributes"]["cmd"]
+        if not os.path.isfile(comm):
+            return
+
+        file_name = os.path.join(self._log_root_dir, data["name"])
+        fd = open(file_name, "a")
+        fd.write(data["doc"])
+        fd.close()
+
+        for arg in data["sources"][0]["attributes"]["args"]:
+            comm = comm + " " + arg
+
+        os.system(comm + " > " + file_name)
+	self.args['logger'].info(data['name'] + " is collected")
+
+    #read linux.yaml and collect artifacts
+    def parse_yaml(self):
+        stream = open( self._yaml_file, "r" )
+
+        for data in yaml.load_all(stream):
+            data_type = data["sources"][0]["type"]
+	    #check type and treat separately
+ 
+            if eq(data_type, "FILE"):
+                self._leave_file_log(data)
+
+            elif eq(data_type, "COMMAND"):
+                self._leave_command_log(data)
+            else:
+                continue
 
 class Dump(object):
     def __init__(self, args):
@@ -514,10 +588,11 @@ class Factory(object):
     def __init__(self, args):
         self.args = args
         self.profiles = \
-            {'fast': {'module': 'fastIR_collector', 'class': [LiveInformations, Dump]},
-             'all': {'module': 'fastIR_collector', 'class': [LiveInformations, Dump, FileSystem]},
+            {'fast': {'module': 'fastIR_collector', 'class': [LiveInformations, Dump, Artifact_collector]},
+             'all': {'module': 'fastIR_collector', 'class': [LiveInformations, Dump, Artifact_collector]},
              'advanced': {'module': 'fastIR_collector', 'class': [LiveInformations, Dump, FileSystem]},
-             'dump': {'module': 'fastIR_Collector', 'class': [Dump]}
+             'dump': {'module': 'fastIR_Collector', 'class': [Dump]},
+	     'artifacts':{'module': 'fastIR_collector', 'class':[Artifact_collector]}
              }
         pass
 
@@ -528,6 +603,7 @@ class Factory(object):
                     c = cl(self.args)
                     for attr in dir(c):
                         if attr != 'args' and not attr.startswith('_'):
+			    self.args['logger'].info(attr)
                             getattr(c, attr)()
 
         pass

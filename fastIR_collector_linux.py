@@ -603,7 +603,6 @@ class Factory(object):
                     c = cl(self.args)
                     for attr in dir(c):
                         if attr != 'args' and not attr.startswith('_'):
-			    self.args['logger'].info(attr)
                             getattr(c, attr)()
 
         pass
